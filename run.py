@@ -59,28 +59,36 @@ def run(questions_json: str, corpus_json: str, out_csv: str):
     )
     RA = RetrievalAugmentation(config=config)
 
-    with open(corpus_json, encoding="utf-8") as f:
-        corpus = json.load(f)
-
-    documents = str([item["title"] + "\n\n" + item["text"] for item in corpus[:30]])
+    corpus = []
+    with open(corpus_json, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            corpus.append(json.loads(line))
+    documents = str([item["contents"] for item in corpus])
     RA.add_documents(documents)
 
-    with open(questions_json, encoding="utf-8") as f:
-        questions = json.load(f)
+    questions = []
+    with open(questions_json, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            questions.append(json.loads(line))
 
     results = []
-
-    for ex in tqdm(questions[:10]):
-        q_id = ex["_id"]
+    for ex in tqdm(questions):
+        q_id = ex.get("id")
         question = ex["question"]
-        gold_answer = ex["answer"]
-        predicted_answer = RA.answer_question(question=question)
+        gold_list = ex.get("golden_answers", [])
+        gold = gold_list[0] if gold_list else ""
+
+        predicted = RA.answer_question(question=question)
 
         results.append({
             "id":               q_id,
             "question":         question,
-            "gold_answer":      gold_answer,
-            "predicted_answer": predicted_answer,
+            "gold_answer":      gold,
+            "predicted_answer": predicted,
         })
 
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
@@ -91,7 +99,7 @@ def run(questions_json: str, corpus_json: str, out_csv: str):
 
 if __name__ == "__main__":
     run(
-        questions_json="../../data/hotpotqa.json",
-        corpus_json="../../data/hotpotqa_corpus.json",
+        questions_json="../../data/hotpotqa/train.jsonl",
+        corpus_json="../../data/hotpotqa/corpus_sentence_6.jsonl",
         out_csv="../../results/raptor_hotpotqa.csv",
     )
