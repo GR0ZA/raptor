@@ -1,3 +1,5 @@
+import argparse
+from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from raptor import RetrievalAugmentation, RetrievalAugmentationConfig, BaseQAModel, BaseEmbeddingModel, BaseSummarizationModel
 import requests
@@ -5,84 +7,143 @@ import os
 import json
 from tqdm import tqdm
 import csv
-
+import logging
 os.environ["OPENAI_API_KEY"] = "not_used"
 
 # TODO: Tokenizer, max_tokens -> see demo.ipynb
-
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 class VLLMHTTPQAModel(BaseQAModel):
     def __init__(self, server_url="http://localhost:8000"):
         self.server_url = server_url.rstrip("/")
 
     def answer_question(self, context: str, question: str) -> str:
-        prompt = f"{context}\n\nQuestion: {question}\nAnswer:"
+        system_tmpl = (
+            "Answer the question based on the given document. "
+            "Return exactly the minimal answer—a named entity or phrase—without any extra words, quotes, or punctuation.\n"
+            f"The following are given documents:\n\n{context}"
+        )
+        user_tmpl = f"Question: {question}"
+
         payload = {
-            "prompt": prompt,
+            "messages": [
+                {"role": "system", "content": system_tmpl},
+                {"role": "user",   "content": user_tmpl}
+            ],
         }
-        resp = requests.post(f"{self.server_url}/v1/completions", json=payload, timeout=30)
+
+        resp = requests.post(
+            f"{self.server_url}/v1/chat/completions",
+            json=payload,
+            timeout=60
+        )
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["text"].strip()
+
+        # extract the assistant message
+        text = data["choices"][0]["message"]["content"]
+        return text.strip()
+
 
 
 class VLLMSummarizationModel(BaseSummarizationModel):
     def __init__(self, server_url="http://localhost:8000"):
         self.server_url = server_url.rstrip("/")
 
-    def summarize(self, context: str, max_tokens=150) -> str:
-        prompt = (
-            f"Please write a concise summary of the following text, "
-            f"including all key details:\n\n{context}\n\nSummary:"
+    def summarize(self, context: str, max_tokens: int = 200) -> str:
+        system_tmpl = (
+            "You are a helpful assistant."
         )
+        user_tmpl = (
+            "Write a summary of the following, including as many key details as possible: " + context
+        )
+
         payload = {
-            "prompt": prompt,
+            "messages": [
+                {"role": "system", "content": system_tmpl},
+                {"role": "user",   "content": user_tmpl},
+            ],
+            "max_tokens": max_tokens,
         }
-        resp = requests.post(f"{self.server_url}/v1/completions", json=payload, timeout=30)
+
+        resp = requests.post(
+            f"{self.server_url}/v1/chat/completions",
+            json=payload,
+            timeout=60
+        )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["text"].strip()
+        data = resp.json()
+
+        text = data["choices"][0]["message"]["content"]
+        return text.strip()
 
 
 class SBertEmbeddingModel(BaseEmbeddingModel):
-    def __init__(self, model_name="sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(self, model_name="/ukp-storage-1/rolka1/.cache/huggingface/hub/models--Qwen--Qwen3-Embedding-8B/snapshots/80946ea0efeac60523ec1a2cc5a65428a650007e"):
         self.model = SentenceTransformer(model_name)
 
     def create_embedding(self, text):
         return self.model.encode(text)
 
-
-def run(questions_json: str, corpus_json: str, out_csv: str):
-    config = RetrievalAugmentationConfig(
-        summarization_model=VLLMSummarizationModel(),
-        qa_model=VLLMHTTPQAModel(),
-        embedding_model=SBertEmbeddingModel(),
-    )
-    RA = RetrievalAugmentation(config=config)
-
+def build_tree(corpus_jsonl: str, tree_path: Path, config: RetrievalAugmentationConfig):
+    logger.info("Building Raptor index tree from corpus: %s", corpus_jsonl)
+    
     corpus = []
-    with open(corpus_json, "r", encoding="utf-8") as f:
+    with open(corpus_jsonl, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
                 continue
             corpus.append(json.loads(line))
     documents = str([item["contents"] for item in corpus])
-    RA.add_documents(documents)
+    
+    logger.info("Adding documents to Raptor index")
+    
+    RA = RetrievalAugmentation(config=config)
+    RA.add_documents(documents, corpus_jsonl)
 
+    tree_path.parent.mkdir(parents=True, exist_ok=True)
+    RA.save(str(tree_path))
+    logger.info("Saved Raptor index tree to %s", tree_path)
+
+
+def run(questions_jsonl: str, corpus_jsonl: str, out_csv: str, dataset_name: str):
+    logger.info("Initializing retrieval‐augmentation pipeline")
+    config = RetrievalAugmentationConfig(
+        summarization_model=VLLMSummarizationModel(),
+        qa_model=VLLMHTTPQAModel(),
+        embedding_model=SBertEmbeddingModel(),
+    )
+    
+    # check if tree exists
+    tree_path = Path(f"/ukp-storage-1/rolka1/thesis/data/{dataset_name}/indexes/raptor_tree.pickle")
+    if not tree_path.exists():
+        build_tree(corpus_jsonl, tree_path, config)
+    
+    RA = RetrievalAugmentation(config=config, tree=str(tree_path))
+
+    # Load questions
     questions = []
-    with open(questions_json, "r", encoding="utf-8") as f:
+    with open(questions_jsonl, "r", encoding="utf-8") as f:
         for line in f:
-            if not line.strip():
-                continue
-            questions.append(json.loads(line))
+            if line.strip():
+                questions.append(json.loads(line))
 
     results = []
-    for ex in tqdm(questions):
+    logger.info("Beginning question answering loop")
+    for ex in tqdm(questions, desc="QA"):
         q_id = ex.get("id")
-        question = ex["question"]
+        question = ex.get("question", "")
         gold_list = ex.get("golden_answers", [])
         gold = gold_list[0] if gold_list else ""
 
+        logger.debug("Answering question %s: %s", q_id, question)
         predicted = RA.answer_question(question=question)
+        logger.debug("Predicted: %s | Gold: %s", predicted, gold)
 
         results.append({
             "id":               q_id,
@@ -91,15 +152,22 @@ def run(questions_json: str, corpus_json: str, out_csv: str):
             "predicted_answer": predicted,
         })
 
+    logger.info("Writing results to %s", out_csv)
+    os.makedirs(os.path.dirname(out_csv), exist_ok=True)
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=results[0].keys())
         writer.writeheader()
         writer.writerows(results)
 
+    logger.info("Done: %d total questions processed", len(results))
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset_name", type=str, default="hotpotqa")
+    args = parser.parse_args()
     run(
-        questions_json="../../data/hotpotqa/train.jsonl",
-        corpus_json="../../data/hotpotqa/corpus_sentence_6.jsonl",
-        out_csv="../../results/raptor_hotpotqa.csv",
+        questions_jsonl=f"/ukp-storage-1/rolka1/thesis/data/{args.dataset_name}/dev.jsonl",
+        corpus_jsonl=f"/ukp-storage-1/rolka1/thesis/data/{args.dataset_name}/corpus_sentence_256.jsonl",
+        out_csv=f"/ukp-storage-1/rolka1/thesis/output/raptor_{args.dataset_name}.csv",
+        dataset_name=args.dataset_name
     )

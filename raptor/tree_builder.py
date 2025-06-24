@@ -257,7 +257,7 @@ class TreeBuilder:
 
         return leaf_nodes
 
-    def build_from_text(self, text: str, use_multithreading: bool = True) -> Tree:
+    def build_from_text(self, text: str, corpus_jsonl, use_multithreading: bool = True) -> Tree:
         """Builds a golden tree from the input text, optionally using multithreading.
 
         Args:
@@ -268,7 +268,8 @@ class TreeBuilder:
         Returns:
             Tree: The golden tree structure.
         """
-        chunks = split_text(text, self.tokenizer, self.max_tokens)
+        # chunks = split_text(text, self.tokenizer, self.max_tokens)
+        chunks = load_chunks_from_jsonl(corpus_jsonl)
 
         logging.info("Creating Leaf Nodes")
 
@@ -367,3 +368,22 @@ class TreeBuilder:
         #     all_tree_nodes.update(new_level_nodes)
 
         # return new_level_nodes
+
+
+def load_chunks_from_jsonl(jsonl_path):
+    """
+    Load each line of the JSONL as one chunk text.
+    Assumes each line has keys "title" and "contents".
+    Returns a list of strings, where each string is:
+       "<title>\n<contents>"
+    """
+    import json
+    chunks = []
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            obj = json.loads(line)
+            contents = obj.get("contents", "").strip()
+            chunks.append(contents)
+    return chunks

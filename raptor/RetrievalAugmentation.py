@@ -201,7 +201,7 @@ class RetrievalAugmentation:
             f"Successfully initialized RetrievalAugmentation with Config {config.log_config()}"
         )
 
-    def add_documents(self, docs):
+    def add_documents(self, docs, corpus_jsonl):
         """
         Adds documents to the tree and creates a TreeRetriever instance.
 
@@ -216,7 +216,7 @@ class RetrievalAugmentation:
                 # self.add_to_existing(docs)
                 return
 
-        self.tree = self.tree_builder.build_from_text(text=docs)
+        self.tree = self.tree_builder.build_from_text(text=docs, corpus_jsonl=corpus_jsonl)
         self.retriever = TreeRetriever(self.tree_retriever_config, self.tree)
 
     def retrieve(
