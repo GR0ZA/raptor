@@ -1,4 +1,5 @@
 import argparse
+import datetime
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from raptor import RetrievalAugmentation, RetrievalAugmentationConfig, BaseQAModel, BaseEmbeddingModel, BaseSummarizationModel
@@ -139,27 +140,28 @@ def run(questions_jsonl: str, corpus_jsonl: str, out_csv: str, dataset_name: str
         q_id = ex.get("id")
         question = ex.get("question", "")
         gold_list = ex.get("golden_answers", [])
-        gold = gold_list[0] if gold_list else ""
 
-        logger.debug("Answering question %s: %s", q_id, question)
-        predicted = RA.answer_question(question=question)
-        logger.debug("Predicted: %s | Gold: %s", predicted, gold)
+        predicted, context = RA.answer_question(question=question, top_k=5)
 
         results.append({
-            "id":               q_id,
-            "question":         question,
-            "gold_answer":      gold,
-            "predicted_answer": predicted,
+            "id":      q_id,
+            "question": question,
+            "gold_answers": gold_list,
+            "output": {
+                "retrieval_result": context,
+                "pred": predicted
+            }
         })
 
-    logger.info("Writing results to %s", out_csv)
-    os.makedirs(os.path.dirname(out_csv), exist_ok=True)
-    with open(out_csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=results[0].keys())
-        writer.writeheader()
-        writer.writerows(results)
+    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M")
+    out_dir = f"/ukp-storage-1/rolka1/thesis/output/{dataset_name}_{timestamp}_raptor"
+    os.makedirs(out_dir, exist_ok=True)
 
-    logger.info("Done: %d total questions processed", len(results))
+    intermediate_path = os.path.join(out_dir, "intermediate_data.json")
+    with open(intermediate_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=4, ensure_ascii=True)
+
+    print(f"✅ Wrote intermediate data to {intermediate_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

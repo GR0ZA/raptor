@@ -296,7 +296,7 @@ class RetrievalAugmentation:
         if return_layer_information:
             return answer, layer_information
 
-        return answer
+        return answer, context
 
     def save(self, path):
         if self.tree is None:
