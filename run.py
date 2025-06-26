@@ -1,5 +1,5 @@
 import argparse
-import datetime
+from datetime import datetime
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from raptor import RetrievalAugmentation, RetrievalAugmentationConfig, BaseQAModel, BaseEmbeddingModel, BaseSummarizationModel
@@ -36,6 +36,13 @@ class VLLMHTTPQAModel(BaseQAModel):
                 {"role": "system", "content": system_tmpl},
                 {"role": "user",   "content": user_tmpl}
             ],
+            "temperature": 0.7,
+            "top_p":       0.8,
+            # vLLM‐only params:
+            "extra_body": {
+                "top_k": 20,
+                "min_p": 0
+            },
         }
 
         resp = requests.post(
@@ -70,6 +77,13 @@ class VLLMSummarizationModel(BaseSummarizationModel):
                 {"role": "user",   "content": user_tmpl},
             ],
             "max_tokens": max_tokens,
+            "temperature": 0.7,
+            "top_p":       0.8,
+            # vLLM‐only params:
+            "extra_body": {
+                "top_k": 20,
+                "min_p": 0
+            },
         }
 
         resp = requests.post(
@@ -84,7 +98,7 @@ class VLLMSummarizationModel(BaseSummarizationModel):
         return text.strip()
 
 
-class SBertEmbeddingModel(BaseEmbeddingModel):
+class Qwen3EmbeddingModel(BaseEmbeddingModel):
     def __init__(self, model_name="/ukp-storage-1/rolka1/.cache/huggingface/hub/models--Qwen--Qwen3-Embedding-8B/snapshots/80946ea0efeac60523ec1a2cc5a65428a650007e"):
         self.model = SentenceTransformer(model_name)
 
@@ -117,7 +131,7 @@ def run(questions_jsonl: str, corpus_jsonl: str, out_csv: str, dataset_name: str
     config = RetrievalAugmentationConfig(
         summarization_model=VLLMSummarizationModel(),
         qa_model=VLLMHTTPQAModel(),
-        embedding_model=SBertEmbeddingModel(),
+        embedding_model=Qwen3EmbeddingModel(),
     )
     
     # check if tree exists
