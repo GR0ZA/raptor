@@ -154,13 +154,15 @@ def run(questions_jsonl: str, corpus_jsonl: str, out_csv: str, dataset_name: str
         q_id = ex.get("id")
         question = ex.get("question", "")
         gold_list = ex.get("golden_answers", [])
+        metadata = ex.get("metadata", {})
 
         predicted, context = RA.answer_question(question=question, top_k=5)
 
         results.append({
             "id":      q_id,
             "question": question,
-            "gold_answers": gold_list,
+            "golden_answers": gold_list,
+            "metadata": metadata,
             "output": {
                 "retrieval_result": context,
                 "pred": predicted
