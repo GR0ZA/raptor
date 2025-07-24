@@ -36,13 +36,6 @@ class VLLMHTTPQAModel(BaseQAModel):
                 {"role": "system", "content": system_tmpl},
                 {"role": "user",   "content": user_tmpl}
             ],
-            "temperature": 0.7,
-            "top_p":       0.8,
-            # vLLM‐only params:
-            "extra_body": {
-                "top_k": 20,
-                "min_p": 0
-            },
         }
 
         resp = requests.post(
@@ -77,13 +70,6 @@ class VLLMSummarizationModel(BaseSummarizationModel):
                 {"role": "user",   "content": user_tmpl},
             ],
             "max_tokens": max_tokens,
-            "temperature": 0.7,
-            "top_p":       0.8,
-            # vLLM‐only params:
-            "extra_body": {
-                "top_k": 20,
-                "min_p": 0
-            },
         }
 
         resp = requests.post(
